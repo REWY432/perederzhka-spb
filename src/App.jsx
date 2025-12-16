@@ -124,19 +124,34 @@ function App() {
   };
 
   const saveBooking = async (bookingData) => {
-    try {
-      if (editingItem) {
-        await supabase.from('bookings').update(bookingData).eq('id', editingItem.id);
-      } else {
-        await supabase.from('bookings').insert([bookingData]);
-      }
-      await loadData();
-      closeModal();
-    } catch (error) {
-      console.error('Error saving booking:', error);
-      alert('Ошибка сохранения');
+  try {
+    // Удаляем read-only поля (вычисляются автоматически)
+    const { total_days, created_at, updated_at, ...cleanData } = bookingData;
+    
+    if (editingItem) {
+      // Обновление существующей брони
+      const { data, error } = await supabase
+        .from('bookings')
+        .update(cleanData)
+        .eq('id', editingItem.id);
+      
+      if (error) throw error;
+    } else {
+      // Создание новой брони
+      const { data, error } = await supabase
+        .from('bookings')
+        .insert([cleanData]);
+      
+      if (error) throw error;
     }
-  };
+    
+    await loadData();
+    closeModal();
+  } catch (error) {
+    console.error('Error saving booking:', error);
+    alert('Ошибка сохранения: ' + error.message);
+  }
+};
 
   const deleteBooking = async (id) => {
     if (!confirm('Удалить бронь?')) return;
