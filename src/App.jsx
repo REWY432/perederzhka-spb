@@ -5,7 +5,7 @@ import { ru } from 'date-fns/locale';
 import { 
   Dog, Calendar, DollarSign, Plus, X, Edit2, Trash2, 
   Save, ArrowLeft, TrendingUp, Bell, Settings, Menu,
-  ChevronLeft, ChevronRight, Filter, PieChart, Receipt
+  ChevronLeft, ChevronRight, Filter, PieChart, Receipt, History
 } from 'lucide-react';
 import './App.css';
 import './Receipt.css';
@@ -44,6 +44,8 @@ function App() {
   const [notifications, setNotifications] = useState([]);
   const [showReceipt, setShowReceipt] = useState(false);
   const [receiptBooking, setReceiptBooking] = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyDog, setHistoryDog] = useState(null);
 
   // Load data from Supabase
   useEffect(() => {
@@ -207,7 +209,7 @@ function App() {
     }
   };
 
-  // Calculate booking total
+  // Calculate booking total - ИСПРАВЛЕНО: издержки теперь ПРИБАВЛЯЮТСЯ
   const calculateBookingTotal = (booking) => {
     const pricePerDay = booking.custom_price_per_day || booking.base_price_per_day;
     const regularDays = (booking.total_days || 0) - (booking.holiday_days || 0);
@@ -215,7 +217,8 @@ function App() {
     const holidayTotal = (booking.holiday_days || 0) * (pricePerDay + (booking.holiday_price_add || 0));
     const bookingExpenses = expenses.filter(e => e.booking_id === booking.id);
     const expensesTotal = bookingExpenses.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
-    return regularTotal + holidayTotal - expensesTotal;
+    // ИСПРАВЛЕНО: издержки ПРИБАВЛЯЮТСЯ (клиент их оплачивает)
+    return regularTotal + holidayTotal + expensesTotal;
   };
 
   // Get dog color
@@ -233,6 +236,17 @@ function App() {
   const closeReceipt = () => {
     setShowReceipt(false);
     setReceiptBooking(null);
+  };
+
+  // History handlers
+  const openHistory = (dog) => {
+    setHistoryDog(dog);
+    setShowHistory(true);
+  };
+
+  const closeHistory = () => {
+    setShowHistory(false);
+    setHistoryDog(null);
   };
 
   // Modal handlers
@@ -292,6 +306,7 @@ function App() {
             openModal={openModal}
             deleteDog={deleteDog}
             calculateBookingTotal={calculateBookingTotal}
+            openHistory={openHistory}
           />
         )}
 
@@ -337,6 +352,16 @@ function App() {
           expenses={expenses.filter(e => e.booking_id === receiptBooking.id)}
           calculateBookingTotal={calculateBookingTotal}
           onClose={closeReceipt}
+        />
+      )}
+
+      {showHistory && historyDog && (
+        <HistoryModal
+          dog={historyDog}
+          bookings={bookings.filter(b => b.dog_id === historyDog.id)}
+          expenses={expenses}
+          calculateBookingTotal={calculateBookingTotal}
+          onClose={closeHistory}
         />
       )}
     </div>
@@ -472,7 +497,7 @@ function CalendarView({ dogs, bookings, currentMonth, setCurrentMonth, getDogCol
 }
 
 // Dogs View Component  
-function DogsView({ dogs, bookings, openModal, deleteDog, calculateBookingTotal }) {
+function DogsView({ dogs, bookings, openModal, deleteDog, calculateBookingTotal, openHistory }) {
   const getDogStats = (dogId) => {
     const dogBookings = bookings.filter(b => b.dog_id === dogId && b.status === 'completed');
     const totalRevenue = dogBookings.reduce((sum, b) => sum + calculateBookingTotal(b), 0);
@@ -504,6 +529,9 @@ function DogsView({ dogs, bookings, openModal, deleteDog, calculateBookingTotal 
                   </span>
                 </div>
                 <div className="dog-actions">
+                  <button className="icon-btn" onClick={() => openHistory(dog)} title="История">
+                    <History size={18} />
+                  </button>
                   <button className="icon-btn" onClick={() => openModal('dog', dog)}>
                     <Edit2 size={18} />
                   </button>
@@ -642,8 +670,8 @@ function BookingsView({ dogs, bookings, expenses, openModal, deleteBooking, dele
                 {bookingExpenses.length > 0 && (
                   <div className="price-row">
                     <span>Издержки:</span>
-                    <span className="text-danger">
-                      -{bookingExpenses.reduce((sum, e) => sum + parseFloat(e.amount), 0).toLocaleString('ru-RU')} ₽
+                    <span className="text-success">
+                      +{bookingExpenses.reduce((sum, e) => sum + parseFloat(e.amount), 0).toLocaleString('ru-RU')} ₽
                     </span>
                   </div>
                 )}
@@ -792,7 +820,7 @@ function ReportsView({ bookings, expenses, dogs, calculateBookingTotal }) {
   );
 }
 
-// Receipt Modal Component
+// КОМПАКТНЫЙ Receipt Modal Component (как на скриншоте)
 function ReceiptModal({ booking, dog, expenses, calculateBookingTotal, onClose }) {
   const pricePerDay = booking.custom_price_per_day || booking.base_price_per_day;
   const regularDays = (booking.total_days || 0) - (booking.holiday_days || 0);
@@ -803,139 +831,179 @@ function ReceiptModal({ booking, dog, expenses, calculateBookingTotal, onClose }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="receipt-modal glass-strong" onClick={(e) => e.stopPropagation()}>
-        <div className="receipt-header">
-          <div className="receipt-logo">
-            <Dog size={48} />
-            <div>
-              <h1>Perederzhka SPB</h1>
-              <p>Передержка собак</p>
-            </div>
+      <div className="receipt-modal-compact glass-strong" onClick={(e) => e.stopPropagation()}>
+        <button className="receipt-close-btn" onClick={onClose}>
+          <X size={20} />
+        </button>
+
+        <div className="receipt-compact-header">
+          <Dog size={40} className="receipt-icon" />
+          <h2>ВЫЕЗДНОЙ ЛИСТ</h2>
+          <p className="receipt-date-small">{format(new Date(), 'd MMMM yyyy г.', { locale: ru })}</p>
+        </div>
+
+        <div className="receipt-divider"></div>
+
+        <div className="receipt-client-info">
+          <h3>{dog?.owner_name || 'Клиент'}</h3>
+          <p>{dog?.breed || 'Шпиц'}</p>
+        </div>
+
+        <div className="receipt-dates-compact">
+          <div className="receipt-date-row">
+            <span className="date-label">Заезд</span>
+            <span className="date-value">{format(parseISO(booking.check_in), 'd MMM.', { locale: ru })}</span>
           </div>
+          <div className="receipt-date-row">
+            <span className="date-label">Выезд</span>
+            <span className="date-value">{format(parseISO(booking.check_out), 'd MMM.', { locale: ru })}</span>
+          </div>
+        </div>
+
+        <div className="receipt-divider"></div>
+
+        <div className="receipt-items-compact">
+          <div className="receipt-item-row">
+            <span>Проживание ({booking.total_days} дн.)</span>
+            <span>{(regularTotal + holidayTotal).toLocaleString('ru-RU')} ₽</span>
+          </div>
+          {expenses.map(exp => (
+            <div key={exp.id} className="receipt-item-row">
+              <span>{exp.name}</span>
+              <span>{parseFloat(exp.amount).toLocaleString('ru-RU')} ₽</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="receipt-divider-thick"></div>
+
+        <div className="receipt-total-compact">
+          <span>ИТОГО</span>
+          <span className="receipt-total-amount-compact">{total.toLocaleString('ru-RU')} ₽</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// History Modal Component
+function HistoryModal({ dog, bookings, expenses, calculateBookingTotal, onClose }) {
+  // Сортируем брони по дате (последние сверху)
+  const sortedBookings = [...bookings].sort((a, b) => 
+    new Date(b.check_in) - new Date(a.check_in)
+  );
+
+  const totalVisits = bookings.length;
+  const completedVisits = bookings.filter(b => b.status === 'completed').length;
+  const totalDays = bookings.reduce((sum, b) => sum + (b.total_days || 0), 0);
+  const totalRevenue = bookings
+    .filter(b => b.status === 'completed')
+    .reduce((sum, b) => sum + calculateBookingTotal(b), 0);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="history-modal glass-strong" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>
+            <History size={24} style={{ marginRight: '0.5rem' }} />
+            История посещений: {dog.name}
+          </h2>
           <button className="icon-btn" onClick={onClose}>
             <X size={24} />
           </button>
         </div>
 
-        <div className="receipt-content">
-          <div className="receipt-section">
-            <h3>Чек на оплату</h3>
-            <p className="receipt-date">Дата: {format(new Date(), 'd MMMM yyyy', { locale: ru })}</p>
+        <div className="history-stats">
+          <div className="history-stat">
+            <span className="stat-label">Всего визитов</span>
+            <span className="stat-value">{totalVisits}</span>
           </div>
+          <div className="history-stat">
+            <span className="stat-label">Завершено</span>
+            <span className="stat-value">{completedVisits}</span>
+          </div>
+          <div className="history-stat">
+            <span className="stat-label">Дней</span>
+            <span className="stat-value">{totalDays}</span>
+          </div>
+          <div className="history-stat">
+            <span className="stat-label">Выручка</span>
+            <span className="stat-value">{totalRevenue.toLocaleString('ru-RU')} ₽</span>
+          </div>
+        </div>
 
-          <div className="receipt-section">
-            <h4>Информация о питомце</h4>
-            <div className="receipt-info-grid">
-              <div className="receipt-info-item">
-                <span className="label">Кличка:</span>
-                <span className="value">{dog?.name || 'Не указано'}</span>
-              </div>
-              <div className="receipt-info-item">
-                <span className="label">Порода:</span>
-                <span className="value">{dog?.breed || 'Не указано'}</span>
-              </div>
-              {dog?.owner_name && (
-                <div className="receipt-info-item">
-                  <span className="label">Владелец:</span>
-                  <span className="value">{dog.owner_name}</span>
-                </div>
-              )}
-              {dog?.owner_phone && (
-                <div className="receipt-info-item">
-                  <span className="label">Телефон:</span>
-                  <span className="value">{dog.owner_phone}</span>
-                </div>
-              )}
+        <div className="history-list">
+          {sortedBookings.length === 0 ? (
+            <div className="history-empty">
+              <p>История посещений пуста</p>
             </div>
-          </div>
+          ) : (
+            sortedBookings.map(booking => {
+              const bookingExpenses = expenses.filter(e => e.booking_id === booking.id);
+              const total = calculateBookingTotal(booking);
 
-          <div className="receipt-section">
-            <h4>Период проживания</h4>
-            <div className="receipt-dates">
-              <div className="receipt-date-item">
-                <Calendar size={20} />
-                <div>
-                  <span className="label">Заезд</span>
-                  <span className="value">{format(parseISO(booking.check_in), 'd MMMM yyyy', { locale: ru })}</span>
-                </div>
-              </div>
-              <div className="receipt-date-separator">—</div>
-              <div className="receipt-date-item">
-                <Calendar size={20} />
-                <div>
-                  <span className="label">Выезд</span>
-                  <span className="value">{format(parseISO(booking.check_out), 'd MMMM yyyy', { locale: ru })}</span>
-                </div>
-              </div>
-            </div>
-            <div className="receipt-total-days">
-              Всего дней: <strong>{booking.total_days}</strong>
-            </div>
-          </div>
+              return (
+                <div key={booking.id} className="history-item glass">
+                  <div className="history-item-header">
+                    <div className="history-dates">
+                      <Calendar size={16} />
+                      <span>
+                        {format(parseISO(booking.check_in), 'd MMM', { locale: ru })} — {format(parseISO(booking.check_out), 'd MMM yyyy', { locale: ru })}
+                      </span>
+                      <span className="history-days">({booking.total_days} дн.)</span>
+                    </div>
+                    <span className={`status-badge status-${booking.status}`}>
+                      {booking.status === 'active' ? 'Активна' :
+                       booking.status === 'upcoming' ? 'Будущая' :
+                       booking.status === 'completed' ? 'Завершена' : 'Отменена'}
+                    </span>
+                  </div>
 
-          <div className="receipt-section">
-            <h4>Детализация</h4>
-            <table className="receipt-table">
-              <thead>
-                <tr>
-                  <th>Услуга</th>
-                  <th>Кол-во</th>
-                  <th>Цена</th>
-                  <th>Сумма</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Проживание (обычные дни)</td>
-                  <td>{regularDays}</td>
-                  <td>{pricePerDay.toLocaleString('ru-RU')} ₽</td>
-                  <td>{regularTotal.toLocaleString('ru-RU')} ₽</td>
-                </tr>
-                {booking.holiday_days > 0 && (
-                  <tr>
-                    <td>Проживание (праздничные дни)</td>
-                    <td>{booking.holiday_days}</td>
-                    <td>{(pricePerDay + booking.holiday_price_add).toLocaleString('ru-RU')} ₽</td>
-                    <td>{holidayTotal.toLocaleString('ru-RU')} ₽</td>
-                  </tr>
-                )}
-                {expenses.length > 0 && expenses.map(exp => (
-                  <tr key={exp.id} className="expense-row">
-                    <td>{exp.name}</td>
-                    <td>1</td>
-                    <td>{parseFloat(exp.amount).toLocaleString('ru-RU')} ₽</td>
-                    <td className="text-danger">-{parseFloat(exp.amount).toLocaleString('ru-RU')} ₽</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  <div className="history-item-details">
+                    <div className="history-detail-row">
+                      <span>Проживание:</span>
+                      <span>{(booking.custom_price_per_day || booking.base_price_per_day).toLocaleString('ru-RU')} ₽/день</span>
+                    </div>
+                    {booking.holiday_days > 0 && (
+                      <div className="history-detail-row">
+                        <span>Праздничные дни ({booking.holiday_days}):</span>
+                        <span>+{booking.holiday_price_add.toLocaleString('ru-RU')} ₽/день</span>
+                      </div>
+                    )}
+                    {bookingExpenses.length > 0 && (
+                      <div className="history-detail-row">
+                        <span>Дополнительно:</span>
+                        <span>+{bookingExpenses.reduce((sum, e) => sum + parseFloat(e.amount), 0).toLocaleString('ru-RU')} ₽</span>
+                      </div>
+                    )}
+                    <div className="history-detail-row history-total">
+                      <span>Итого:</span>
+                      <span className="history-total-amount">{total.toLocaleString('ru-RU')} ₽</span>
+                    </div>
+                  </div>
 
-          <div className="receipt-section receipt-total-section">
-            <div className="receipt-subtotals">
-              <div className="receipt-subtotal-item">
-                <span>Проживание:</span>
-                <span>{(regularTotal + holidayTotal).toLocaleString('ru-RU')} ₽</span>
-              </div>
-              {expensesTotal > 0 && (
-                <div className="receipt-subtotal-item">
-                  <span>Дополнительные расходы:</span>
-                  <span className="text-danger">-{expensesTotal.toLocaleString('ru-RU')} ₽</span>
+                  {bookingExpenses.length > 0 && (
+                    <div className="history-expenses">
+                      <strong>Дополнительные услуги:</strong>
+                      <div className="history-expenses-list">
+                        {bookingExpenses.map(exp => (
+                          <span key={exp.id} className="history-expense-tag">
+                            {exp.name} ({parseFloat(exp.amount).toLocaleString('ru-RU')} ₽)
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {booking.notes && (
+                    <div className="history-notes">
+                      <strong>Заметки:</strong> {booking.notes}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            <div className="receipt-total">
-              <span>К оплате:</span>
-              <span className="receipt-total-amount">{total.toLocaleString('ru-RU')} ₽</span>
-            </div>
-          </div>
-
-          <div className="receipt-footer">
-            <p>Спасибо за доверие! 🐕</p>
-            <p className="receipt-footer-note">
-              Сделайте скриншот этого чека для ваших записей
-            </p>
-          </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>
@@ -967,7 +1035,6 @@ function Modal({ type, item, dogs, bookings, onClose, onSave }) {
         notes: ''
       };
     } else {
-      // expense: если item есть но нет id - это создание с booking_id
       return item || {
         booking_id: bookings.filter(b => b.status !== 'cancelled')[0]?.id || '',
         name: '',
@@ -980,7 +1047,6 @@ function Modal({ type, item, dogs, bookings, onClose, onSave }) {
     e.preventDefault();
     
     if (type === 'booking' && !item) {
-      // Для новой брони устанавливаем базовую цену
       const selectedDog = dogs.find(d => d.id === formData.dog_id);
       if (selectedDog) {
         formData.base_price_per_day = BASE_PRICES[selectedDog.breed_size];
