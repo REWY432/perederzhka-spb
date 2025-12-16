@@ -5,9 +5,10 @@ import { ru } from 'date-fns/locale';
 import { 
   Dog, Calendar, DollarSign, Plus, X, Edit2, Trash2, 
   Save, ArrowLeft, TrendingUp, Bell, Settings, Menu,
-  ChevronLeft, ChevronRight, Filter, PieChart
+  ChevronLeft, ChevronRight, Filter, PieChart, Receipt
 } from 'lucide-react';
 import './App.css';
+import './Receipt.css';
 
 // Supabase configuration - REPLACE WITH YOUR CREDENTIALS
 const SUPABASE_URL = 'https://ezqhzkugtgzhxlrelhwx.supabase.co';
@@ -29,7 +30,7 @@ const DOG_COLORS = [
 ];
 
 function App() {
-  const [view, setView] = useState('calendar'); // calendar, dogs, bookings, reports, settings
+  const [view, setView] = useState('calendar');
   const [dogs, setDogs] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -37,18 +38,26 @@ function App() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
   const [showModal, setShowModal] = useState(false);
-  const [modalType, setModalType] = useState(null); // dog, booking, expense
+  const [modalType, setModalType] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const [showReceipt, setShowReceipt] = useState(false);
+  const [receiptBooking, setReceiptBooking] = useState(null);
 
   // Load data from Supabase
   useEffect(() => {
     loadData();
-    checkNotifications();
-    const interval = setInterval(checkNotifications, 60000); // Check every minute
-    return () => clearInterval(interval);
   }, []);
+
+  // Check notifications when bookings or dogs change
+  useEffect(() => {
+    if (bookings.length > 0 && dogs.length > 0) {
+      checkNotifications();
+      const interval = setInterval(checkNotifications, 60000);
+      return () => clearInterval(interval);
+    }
+  }, [bookings, dogs]);
 
   const loadData = async () => {
     setLoading(true);
@@ -71,6 +80,7 @@ function App() {
 
   const checkNotifications = () => {
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
@@ -99,105 +109,112 @@ function App() {
   // CRUD operations
   const saveDog = async (dogData) => {
     try {
-      if (editingItem) {
-        await supabase.from('dogs').update(dogData).eq('id', editingItem.id);
+      if (editingItem?.id) {
+        const { created_at, updated_at, ...cleanData } = dogData;
+        const { error } = await supabase.from('dogs').update(cleanData).eq('id', editingItem.id);
+        if (error) throw error;
       } else {
-        await supabase.from('dogs').insert([dogData]);
+        const { error } = await supabase.from('dogs').insert([dogData]);
+        if (error) throw error;
       }
       await loadData();
       closeModal();
     } catch (error) {
       console.error('Error saving dog:', error);
-      alert('Ошибка сохранения');
+      alert('Ошибка сохранения: ' + (error.message || 'Неизвестная ошибка'));
     }
   };
 
   const deleteDog = async (id) => {
     if (!confirm('Удалить собаку? Все связанные брони также будут удалены.')) return;
     try {
-      await supabase.from('dogs').delete().eq('id', id);
+      const { error } = await supabase.from('dogs').delete().eq('id', id);
+      if (error) throw error;
       await loadData();
     } catch (error) {
       console.error('Error deleting dog:', error);
-      alert('Ошибка удаления');
+      alert('Ошибка удаления: ' + (error.message || 'Неизвестная ошибка'));
     }
   };
 
   const saveBooking = async (bookingData) => {
-  try {
-    // Удаляем read-only поля (вычисляются автоматически)
-    const { total_days, created_at, updated_at, ...cleanData } = bookingData;
-    
-    if (editingItem) {
-      // Обновление существующей брони
-      const { data, error } = await supabase
-        .from('bookings')
-        .update(cleanData)
-        .eq('id', editingItem.id);
+    try {
+      // Валидация дат
+      if (bookingData.check_out < bookingData.check_in) {
+        alert('Дата выезда не может быть раньше даты заезда');
+        return;
+      }
+
+      // Исключаем generated и timestamp поля
+      const { total_days, created_at, updated_at, ...cleanData } = bookingData;
       
-      if (error) throw error;
-    } else {
-      // Создание новой брони
-      const { data, error } = await supabase
-        .from('bookings')
-        .insert([cleanData]);
-      
-      if (error) throw error;
+      if (editingItem?.id) {
+        const { error } = await supabase.from('bookings').update(cleanData).eq('id', editingItem.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('bookings').insert([cleanData]);
+        if (error) throw error;
+      }
+      await loadData();
+      closeModal();
+    } catch (error) {
+      console.error('Error saving booking:', error);
+      alert('Ошибка сохранения: ' + (error.message || 'Неизвестная ошибка'));
     }
-    
-    await loadData();
-    closeModal();
-  } catch (error) {
-    console.error('Error saving booking:', error);
-    alert('Ошибка сохранения: ' + error.message);
-  }
-};
+  };
 
   const deleteBooking = async (id) => {
     if (!confirm('Удалить бронь?')) return;
     try {
-      await supabase.from('bookings').delete().eq('id', id);
+      const { error } = await supabase.from('bookings').delete().eq('id', id);
+      if (error) throw error;
       await loadData();
     } catch (error) {
       console.error('Error deleting booking:', error);
-      alert('Ошибка удаления');
+      alert('Ошибка удаления: ' + (error.message || 'Неизвестная ошибка'));
     }
   };
 
   const saveExpense = async (expenseData) => {
     try {
-      if (editingItem) {
-        await supabase.from('expenses').update(expenseData).eq('id', editingItem.id);
+      // Проверяем, есть ли реальный ID для обновления
+      if (editingItem?.id && typeof editingItem.id === 'string' && editingItem.id.length > 0) {
+        const { created_at, ...cleanData } = expenseData;
+        const { error } = await supabase.from('expenses').update(cleanData).eq('id', editingItem.id);
+        if (error) throw error;
       } else {
-        await supabase.from('expenses').insert([expenseData]);
+        // Создание новой издержки
+        const { error } = await supabase.from('expenses').insert([expenseData]);
+        if (error) throw error;
       }
       await loadData();
       closeModal();
     } catch (error) {
       console.error('Error saving expense:', error);
-      alert('Ошибка сохранения');
+      alert('Ошибка сохранения: ' + (error.message || 'Неизвестная ошибка'));
     }
   };
 
   const deleteExpense = async (id) => {
     if (!confirm('Удалить издержку?')) return;
     try {
-      await supabase.from('expenses').delete().eq('id', id);
+      const { error } = await supabase.from('expenses').delete().eq('id', id);
+      if (error) throw error;
       await loadData();
     } catch (error) {
       console.error('Error deleting expense:', error);
-      alert('Ошибка удаления');
+      alert('Ошибка удаления: ' + (error.message || 'Неизвестная ошибка'));
     }
   };
 
   // Calculate booking total
   const calculateBookingTotal = (booking) => {
     const pricePerDay = booking.custom_price_per_day || booking.base_price_per_day;
-    const regularDays = booking.total_days - (booking.holiday_days || 0);
+    const regularDays = (booking.total_days || 0) - (booking.holiday_days || 0);
     const regularTotal = regularDays * pricePerDay;
     const holidayTotal = (booking.holiday_days || 0) * (pricePerDay + (booking.holiday_price_add || 0));
     const bookingExpenses = expenses.filter(e => e.booking_id === booking.id);
-    const expensesTotal = bookingExpenses.reduce((sum, e) => sum + parseFloat(e.amount), 0);
+    const expensesTotal = bookingExpenses.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
     return regularTotal + holidayTotal - expensesTotal;
   };
 
@@ -207,10 +224,26 @@ function App() {
     return DOG_COLORS[index % DOG_COLORS.length];
   };
 
+  // Receipt handlers
+  const openReceipt = (booking) => {
+    setReceiptBooking(booking);
+    setShowReceipt(true);
+  };
+
+  const closeReceipt = () => {
+    setShowReceipt(false);
+    setReceiptBooking(null);
+  };
+
   // Modal handlers
   const openModal = (type, item = null) => {
     setModalType(type);
-    setEditingItem(item);
+    // Для издержек: если передан объект с booking_id но без id - это создание
+    if (type === 'expense' && item && !item.id) {
+      setEditingItem(null);
+    } else {
+      setEditingItem(item);
+    }
     setShowModal(true);
   };
 
@@ -272,6 +305,7 @@ function App() {
             deleteExpense={deleteExpense}
             getDogColor={getDogColor}
             calculateBookingTotal={calculateBookingTotal}
+            openReceipt={openReceipt}
           />
         )}
 
@@ -293,6 +327,16 @@ function App() {
           bookings={bookings}
           onClose={closeModal}
           onSave={modalType === 'dog' ? saveDog : modalType === 'booking' ? saveBooking : saveExpense}
+        />
+      )}
+
+      {showReceipt && receiptBooking && (
+        <ReceiptModal
+          booking={receiptBooking}
+          dog={dogs.find(d => d.id === receiptBooking.dog_id)}
+          expenses={expenses.filter(e => e.booking_id === receiptBooking.id)}
+          calculateBookingTotal={calculateBookingTotal}
+          onClose={closeReceipt}
         />
       )}
     </div>
@@ -432,7 +476,7 @@ function DogsView({ dogs, bookings, openModal, deleteDog, calculateBookingTotal 
   const getDogStats = (dogId) => {
     const dogBookings = bookings.filter(b => b.dog_id === dogId && b.status === 'completed');
     const totalRevenue = dogBookings.reduce((sum, b) => sum + calculateBookingTotal(b), 0);
-    const totalDays = dogBookings.reduce((sum, b) => sum + b.total_days, 0);
+    const totalDays = dogBookings.reduce((sum, b) => sum + (b.total_days || 0), 0);
     return { totalRevenue, totalDays, bookingsCount: dogBookings.length };
   };
 
@@ -504,8 +548,8 @@ function DogsView({ dogs, bookings, openModal, deleteDog, calculateBookingTotal 
 }
 
 // Bookings View Component
-function BookingsView({ dogs, bookings, expenses, openModal, deleteBooking, deleteExpense, getDogColor, calculateBookingTotal }) {
-  const [filter, setFilter] = useState('all'); // all, active, upcoming, completed, cancelled
+function BookingsView({ dogs, bookings, expenses, openModal, deleteBooking, deleteExpense, getDogColor, calculateBookingTotal, openReceipt }) {
+  const [filter, setFilter] = useState('all');
 
   const filteredBookings = filter === 'all' 
     ? bookings 
@@ -559,6 +603,13 @@ function BookingsView({ dogs, bookings, expenses, openModal, deleteBooking, dele
                   </span>
                 </div>
                 <div className="booking-actions">
+                  <button 
+                    className="icon-btn" 
+                    onClick={() => openReceipt(booking)}
+                    title="Сформировать чек"
+                  >
+                    <Receipt size={18} />
+                  </button>
                   <button className="icon-btn" onClick={() => openModal('booking', booking)}>
                     <Edit2 size={18} />
                   </button>
@@ -633,7 +684,7 @@ function BookingsView({ dogs, bookings, expenses, openModal, deleteBooking, dele
 
 // Reports View Component
 function ReportsView({ bookings, expenses, dogs, calculateBookingTotal }) {
-  const [period, setPeriod] = useState('month'); // month, quarter, year, all
+  const [period, setPeriod] = useState('month');
   const [startDate, setStartDate] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
 
@@ -652,7 +703,7 @@ function ReportsView({ bookings, expenses, dogs, calculateBookingTotal }) {
   const potentialRevenue = upcomingBookings.reduce((sum, b) => sum + calculateBookingTotal(b), 0);
   const totalExpenses = expenses
     .filter(e => completedBookings.some(b => b.id === e.booking_id))
-    .reduce((sum, e) => sum + parseFloat(e.amount), 0);
+    .reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
 
   const topDogs = dogs.map(dog => {
     const dogBookings = completedBookings.filter(b => b.dog_id === dog.id);
@@ -741,6 +792,156 @@ function ReportsView({ bookings, expenses, dogs, calculateBookingTotal }) {
   );
 }
 
+// Receipt Modal Component
+function ReceiptModal({ booking, dog, expenses, calculateBookingTotal, onClose }) {
+  const pricePerDay = booking.custom_price_per_day || booking.base_price_per_day;
+  const regularDays = (booking.total_days || 0) - (booking.holiday_days || 0);
+  const regularTotal = regularDays * pricePerDay;
+  const holidayTotal = (booking.holiday_days || 0) * (pricePerDay + (booking.holiday_price_add || 0));
+  const expensesTotal = expenses.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
+  const total = calculateBookingTotal(booking);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="receipt-modal glass-strong" onClick={(e) => e.stopPropagation()}>
+        <div className="receipt-header">
+          <div className="receipt-logo">
+            <Dog size={48} />
+            <div>
+              <h1>Perederzhka SPB</h1>
+              <p>Передержка собак</p>
+            </div>
+          </div>
+          <button className="icon-btn" onClick={onClose}>
+            <X size={24} />
+          </button>
+        </div>
+
+        <div className="receipt-content">
+          <div className="receipt-section">
+            <h3>Чек на оплату</h3>
+            <p className="receipt-date">Дата: {format(new Date(), 'd MMMM yyyy', { locale: ru })}</p>
+          </div>
+
+          <div className="receipt-section">
+            <h4>Информация о питомце</h4>
+            <div className="receipt-info-grid">
+              <div className="receipt-info-item">
+                <span className="label">Кличка:</span>
+                <span className="value">{dog?.name || 'Не указано'}</span>
+              </div>
+              <div className="receipt-info-item">
+                <span className="label">Порода:</span>
+                <span className="value">{dog?.breed || 'Не указано'}</span>
+              </div>
+              {dog?.owner_name && (
+                <div className="receipt-info-item">
+                  <span className="label">Владелец:</span>
+                  <span className="value">{dog.owner_name}</span>
+                </div>
+              )}
+              {dog?.owner_phone && (
+                <div className="receipt-info-item">
+                  <span className="label">Телефон:</span>
+                  <span className="value">{dog.owner_phone}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="receipt-section">
+            <h4>Период проживания</h4>
+            <div className="receipt-dates">
+              <div className="receipt-date-item">
+                <Calendar size={20} />
+                <div>
+                  <span className="label">Заезд</span>
+                  <span className="value">{format(parseISO(booking.check_in), 'd MMMM yyyy', { locale: ru })}</span>
+                </div>
+              </div>
+              <div className="receipt-date-separator">—</div>
+              <div className="receipt-date-item">
+                <Calendar size={20} />
+                <div>
+                  <span className="label">Выезд</span>
+                  <span className="value">{format(parseISO(booking.check_out), 'd MMMM yyyy', { locale: ru })}</span>
+                </div>
+              </div>
+            </div>
+            <div className="receipt-total-days">
+              Всего дней: <strong>{booking.total_days}</strong>
+            </div>
+          </div>
+
+          <div className="receipt-section">
+            <h4>Детализация</h4>
+            <table className="receipt-table">
+              <thead>
+                <tr>
+                  <th>Услуга</th>
+                  <th>Кол-во</th>
+                  <th>Цена</th>
+                  <th>Сумма</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Проживание (обычные дни)</td>
+                  <td>{regularDays}</td>
+                  <td>{pricePerDay.toLocaleString('ru-RU')} ₽</td>
+                  <td>{regularTotal.toLocaleString('ru-RU')} ₽</td>
+                </tr>
+                {booking.holiday_days > 0 && (
+                  <tr>
+                    <td>Проживание (праздничные дни)</td>
+                    <td>{booking.holiday_days}</td>
+                    <td>{(pricePerDay + booking.holiday_price_add).toLocaleString('ru-RU')} ₽</td>
+                    <td>{holidayTotal.toLocaleString('ru-RU')} ₽</td>
+                  </tr>
+                )}
+                {expenses.length > 0 && expenses.map(exp => (
+                  <tr key={exp.id} className="expense-row">
+                    <td>{exp.name}</td>
+                    <td>1</td>
+                    <td>{parseFloat(exp.amount).toLocaleString('ru-RU')} ₽</td>
+                    <td className="text-danger">-{parseFloat(exp.amount).toLocaleString('ru-RU')} ₽</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="receipt-section receipt-total-section">
+            <div className="receipt-subtotals">
+              <div className="receipt-subtotal-item">
+                <span>Проживание:</span>
+                <span>{(regularTotal + holidayTotal).toLocaleString('ru-RU')} ₽</span>
+              </div>
+              {expensesTotal > 0 && (
+                <div className="receipt-subtotal-item">
+                  <span>Дополнительные расходы:</span>
+                  <span className="text-danger">-{expensesTotal.toLocaleString('ru-RU')} ₽</span>
+                </div>
+              )}
+            </div>
+            <div className="receipt-total">
+              <span>К оплате:</span>
+              <span className="receipt-total-amount">{total.toLocaleString('ru-RU')} ₽</span>
+            </div>
+          </div>
+
+          <div className="receipt-footer">
+            <p>Спасибо за доверие! 🐕</p>
+            <p className="receipt-footer-note">
+              Сделайте скриншот этого чека для ваших записей
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Modal Component
 function Modal({ type, item, dogs, bookings, onClose, onSave }) {
   const [formData, setFormData] = useState(() => {
@@ -766,8 +967,9 @@ function Modal({ type, item, dogs, bookings, onClose, onSave }) {
         notes: ''
       };
     } else {
+      // expense: если item есть но нет id - это создание с booking_id
       return item || {
-        booking_id: item?.booking_id || bookings[0]?.id || '',
+        booking_id: bookings.filter(b => b.status !== 'cancelled')[0]?.id || '',
         name: '',
         amount: 0
       };
@@ -777,7 +979,8 @@ function Modal({ type, item, dogs, bookings, onClose, onSave }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     
-    if (type === 'booking') {
+    if (type === 'booking' && !item) {
+      // Для новой брони устанавливаем базовую цену
       const selectedDog = dogs.find(d => d.id === formData.dog_id);
       if (selectedDog) {
         formData.base_price_per_day = BASE_PRICES[selectedDog.breed_size];
