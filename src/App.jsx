@@ -831,7 +831,7 @@ function ReceiptModal({ booking, dog, expenses, calculateBookingTotal, onClose }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="receipt-modal-compact glass-strong" onClick={(e) => e.stopPropagation()}>
+      <div className="receipt-modal-compact" onClick={(e) => e.stopPropagation()}>
         <button className="receipt-close-btn" onClick={onClose}>
           <X size={20} />
         </button>
